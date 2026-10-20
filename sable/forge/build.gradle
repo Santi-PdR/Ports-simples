@@ -451,6 +451,29 @@ tasks.register('mergeSableRefmap') {
             }
         }
 
+        // Mixin 0.8.5 does not emit selectors used by MixinExtras
+        // WrapOperation reliably. Sable's plot tick adapter must resolve both
+        // the enclosing Level method and its shouldTickBlocksAt call in the
+        // production Forge runtime, where Minecraft members use SRG names.
+        def plotBlockEntityTickMixin = 'dev/ryanhcode/sable/mixin/plot/LevelBlockEntityTickPolicyMixin'
+        def plotBlockEntityTickMappings = [
+                tickBlockEntities: 'Lnet/minecraft/world/level/Level;m_46463_()V',
+                'Lnet/minecraft/world/level/Level;shouldTickBlocksAt(Lnet/minecraft/core/BlockPos;)Z': 'Lnet/minecraft/world/level/Level;m_220393_(Lnet/minecraft/core/BlockPos;)Z'
+        ]
+        [base.mappings, base.data.searge].each { section ->
+            def actual = section.computeIfAbsent(plotBlockEntityTickMixin) { [:] }
+            plotBlockEntityTickMappings.each { selector, expected ->
+                actual[selector] = expected
+            }
+        }
+        [base.mappings[plotBlockEntityTickMixin], base.data.searge[plotBlockEntityTickMixin]].each { actual ->
+            plotBlockEntityTickMappings.each { selector, expected ->
+                if (actual == null || actual[selector] != expected) {
+                    throw new GradleException("Missing or incorrect plot block-entity tick SRG mapping for ${selector}: ${actual == null ? null : actual[selector]}")
+                }
+            }
+        }
+
         // ServerChunkCache loads while an integrated server creates or opens a
         // world. A missing SRG selector therefore bricks both paths before any
         // gameplay validation can run. Keep the complete target adapter mapping
