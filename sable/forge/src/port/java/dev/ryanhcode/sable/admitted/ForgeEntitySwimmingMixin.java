@@ -56,7 +56,8 @@ public abstract class ForgeEntitySwimmingMixin {
      * @author RyanH; Forge 1.20.1 adaptation by the Sable port
      * @reason Apply vanilla and sublevel fluid height/pushing through Forge's predicate entry point.
      */
-    @Inject(method = "updateFluidHeightAndDoFluidPushing", at = @At("HEAD"), cancellable = true, remap = false)
+    @Inject(method = "updateFluidHeightAndDoFluidPushing(Ljava/util/function/Predicate;)V",
+            at = @At("HEAD"), cancellable = true, remap = false)
     private void sable$updateFluidHeightAndDoFluidPushing(final Predicate<FluidState> shouldUpdate,
                                                           final CallbackInfo ci) {
         this.sable$updateFluidHeightAndDoFluidPushingWithSubLevels(shouldUpdate);
