@@ -29,7 +29,6 @@ import net.minecraftforge.fluids.FluidType;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -57,8 +56,15 @@ public abstract class ForgeEntitySwimmingMixin {
      * @author RyanH; Forge 1.20.1 adaptation by the Sable port
      * @reason Apply vanilla and sublevel fluid height/pushing through Forge's predicate entry point.
      */
-    @Overwrite(remap = false)
-    public void updateFluidHeightAndDoFluidPushing(final Predicate<FluidState> shouldUpdate) {
+    @Inject(method = "updateFluidHeightAndDoFluidPushing", at = @At("HEAD"), cancellable = true, remap = false)
+    private void sable$updateFluidHeightAndDoFluidPushing(final Predicate<FluidState> shouldUpdate,
+                                                          final CallbackInfo ci) {
+        this.sable$updateFluidHeightAndDoFluidPushingWithSubLevels(shouldUpdate);
+        ci.cancel();
+    }
+
+    @Unique
+    private void sable$updateFluidHeightAndDoFluidPushingWithSubLevels(final Predicate<FluidState> shouldUpdate) {
         if (this.touchingUnloadedChunk()) {
             return;
         }

@@ -1,12 +1,13 @@
 package dev.ryanhcode.sable.mixin.plot;
 
 import dev.ryanhcode.sable.sublevel.plot.PlotBlockActivityPolicy;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
  * Adapts Sable's plot ticking responsibility to the Minecraft 1.20.1 call graph.
@@ -21,14 +22,14 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 @Mixin(Level.class)
 public abstract class LevelBlockEntityTickPolicyMixin {
 
-    @Redirect(
+    @WrapOperation(
             method = "tickBlockEntities",
             at = @At(
                     value = "INVOKE",
                     target = "Lnet/minecraft/world/level/Level;shouldTickBlocksAt(Lnet/minecraft/core/BlockPos;)Z"
             )
     )
-    private boolean sable$shouldTickPlotBlockEntity(final Level instance, final BlockPos pos) {
-        return PlotBlockActivityPolicy.shouldProcess(instance, pos, instance.shouldTickBlocksAt(pos));
+    private boolean sable$shouldTickPlotBlockEntity(final Level instance, final BlockPos pos, final Operation<Boolean> original) {
+        return PlotBlockActivityPolicy.shouldProcess(instance, pos, original.call(instance, pos));
     }
 }
