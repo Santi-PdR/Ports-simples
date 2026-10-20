@@ -28,13 +28,13 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Iterator;
 import java.util.UUID;
@@ -193,11 +193,11 @@ public abstract class EntityMovementStateMixin implements EntityMovementExtensio
         return this.sable$inBlockStatePos;
     }
 
-    /** @author RyanH @reason Take sub-level blocks into account. */
-    @Overwrite
-    public BlockState getFeetBlockState() {
-        final Level currentLevel = this.level();
+    /** Apply sub-level foot state after vanilla and other mods inspect its cached lookup. */
+    @Inject(method = "getFeetBlockState", at = @At("TAIL"), cancellable = true)
+    private void sable$subLevelFeetBlockState(final CallbackInfoReturnable<BlockState> cir) {
         if (this.feetBlockState == null || this.sable$trackingSubLevel != null) {
+            final Level currentLevel = this.level();
             this.feetBlockState = currentLevel.getBlockState(this.blockPosition);
             this.sable$inBlockStatePos = this.blockPosition;
             final Iterator<SubLevel> intersecting = Sable.HELPER
@@ -209,8 +209,8 @@ public abstract class EntityMovementStateMixin implements EntityMovementExtensio
                 this.feetBlockState = currentLevel.getBlockState(localPos);
                 this.sable$inBlockStatePos = localPos;
             }
+            cir.setReturnValue(this.feetBlockState);
         }
-        return this.feetBlockState;
     }
 
     @Override
