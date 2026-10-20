@@ -1,0 +1,86 @@
+plugins {
+    id 'multiloader-common'
+}
+
+configurations {
+    commonJava {
+        canBeResolved = true
+    }
+    commonResources {
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    def commonProjectPath = project.path.contains(':') ? ":${project.parent.name}:common" : ':common'
+
+    compileOnly(project(commonProjectPath)) {
+        capabilities {
+            requireCapability "$group:$mod_id"
+        }
+    }
+    commonJava project(path: commonProjectPath, configuration: 'commonJava')
+    commonResources project(path: commonProjectPath, configuration: 'commonResources')
+
+    // ---
+
+    // The loader task compiles the shared Java sources directly. Mirror the
+    // shared source-set's compile-only contracts so loader compilation sees the
+    // same optional integration and Mixin APIs as :common:compileJava.
+    compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+    annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+    compileOnly("maven.modrinth:natures-compass:$minecraft_version-$natures_compass_version-forge")
+    compileOnly("maven.modrinth:explorers-compass:$minecraft_version-$explorers_compass_version-forge")
+    compileOnly("maven.modrinth:GchcoXML:$oculus_version_id")
+    compileOnly("maven.modrinth:embeddium:$embeddium_version")
+
+    compileOnly("top.theillusivec4.curios:curios-forge:${curios_version}+${minecraft_version}")
+    compileOnly("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+
+    // Veil dev jar is remapped SRG -> named by patchVeilForNamedDev (from multiloader-common).
+    implementation files(tasks.named('patchVeilForNamedDev'))
+    // Same rule for the external Sable production JAR: compile and run against
+    // its named development view, never the raw SRG bytecode.
+    implementation files(tasks.named('patchSableForNamedDev'))
+
+    // Mod compat: only mods with verified 1.20.1 Forge coordinates are kept.
+    compileOnly("cc.tweaked:cc-tweaked-$minecraft_version-core-api:$computercraft_tweaked_version")
+    compileOnly("cc.tweaked:cc-tweaked-$minecraft_version-forge-api:$computercraft_tweaked_version")
+    // DEFERRED (no verified 1.20.1 Forge target artifact frozen yet; not installed in PJ):
+    // natures-compass, explorers-compass, sodium, iris
+}
+
+// modImplementation / jarJar are registered by MDG legacyforge, which module
+// build scripts apply after this convention plugin.
+plugins.withId('net.neoforged.moddev.legacyforge') {
+    dependencies {
+        modImplementation("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+        modImplementation("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}")
+        modCompileOnly("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}")
+        modImplementation("dev.engine-room.flywheel:flywheel-forge-${minecraft_version}:${flywheel_version}")
+        modImplementation("com.tterrag.registrate:Registrate:${registrate_version}")
+        modImplementation("top.theillusivec4.curios:curios-forge:${curios_version}+${minecraft_version}")
+        modImplementation("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+        modRuntimeOnly("cc.tweaked:cc-tweaked-$minecraft_version-forge:$computercraft_tweaked_version")
+
+        // MixinExtras aligned with the Sable port's bundled version.
+        implementation(jarJar('io.github.llamalad7:mixinextras-forge:0.5.3'))
+    }
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn(configurations.commonJava)
+    source(configurations.commonJava)
+}
+
+processResources {
+    dependsOn(configurations.commonResources)
+    from(configurations.commonResources)
+}
+
+tasks.named('sourcesJar', Jar) {
+    dependsOn(configurations.commonJava)
+    from(configurations.commonJava)
+    dependsOn(configurations.commonResources)
+    from(configurations.commonResources)
+}

@@ -1,0 +1,4 @@
+- Fix CC compat with linked typewriter
+- Portable engines are now polite enough to not remove creative blaze cakes from survival players
+- Allow Tires to specify a minimum friction
+- Fix some issues with Docking Connector fluid handling

@@ -1,0 +1,126 @@
+plugins {
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+def forgeProjects = rootProject.subprojects.findAll { it.path.endsWith(":forge") }
+
+forgeProjects.each { forgeProject ->
+    evaluationDependsOn(forgeProject.path)
+}
+
+legacyForge {
+    version = "${minecraft_version}-${forge_version}"
+
+    forgeProjects.forEach { forgeProject ->
+        def parentName = forgeProject.parent.name
+        def commonProject = project(":$parentName:common")
+        def at = commonProject.file('src/main/resources/META-INF/accesstransformer.cfg')
+
+        if (at.exists()) {
+            accessTransformers.from(at.absolutePath)
+        }
+    }
+
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+
+    runs {
+        configureEach {
+            programArgument('-mixin.config=simulated.mixins.json')
+            programArgument('-mixin.config=simulated-forge.mixins.json')
+            programArgument('-mixin.config=aeronautics.mixins.json')
+            programArgument('-mixin.config=aeronautics-forge.mixins.json')
+            programArgument('-mixin.config=offroad.mixins.json')
+            programArgument('-mixin.config=offroad-forge.mixins.json')
+            ideName = "Forge ${it.name.capitalize()} (${project.path})"
+        }
+
+        client {
+            client()
+            gameDirectory = project.file('runs/client')
+
+            def quickPlayWorld = providers.gradleProperty('quickPlayWorld').orNull
+            if (quickPlayWorld != null && !quickPlayWorld.isBlank()) {
+                programArgument '--quickPlaySingleplayer'
+                programArgument quickPlayWorld
+            }
+
+            if (providers.gradleProperty('liveNetworkValidation').map(Boolean::parseBoolean).getOrElse(false)) {
+                systemProperty 'simulated.validation.liveNetwork', 'true'
+            }
+
+            if (providers.gradleProperty('subLevelRenderValidation').map(Boolean::parseBoolean).getOrElse(false)) {
+                systemProperty 'simulated.validation.subLevelRender', 'true'
+                programArgument '-mixin.config=simulated-validation.mixins.json'
+            }
+        }
+
+        server {
+            server()
+            gameDirectory = project.file('runs/server')
+            programArgument 'nogui'
+
+            if (providers.gradleProperty('dedicatedServerValidation').map(Boolean::parseBoolean).getOrElse(false)) {
+                systemProperty 'simulated.validation.dedicatedServer', 'true'
+            }
+        }
+
+        gameTest {
+            type = 'gameTestServer'
+            gameDirectory = project.file('runs/gametest')
+            systemProperty 'forge.enabledGameTestNamespaces', 'simulated'
+        }
+    }
+
+    mods {
+        forgeProjects.forEach { forgeProject ->
+            def parentName = forgeProject.parent.name
+            "$parentName" {
+                sourceSet forgeProject.sourceSets.main
+            }
+        }
+
+        simulated {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.register("runDataAll") {
+    group = "mod development"
+    forgeProjects.forEach { forgeProject ->
+        dependsOn(forgeProject.tasks.runData)
+    }
+}
+
+tasks.named('runGameTest') {
+    doFirst {
+        if (!providers.gradleProperty('reuseGameTestWorld').map(Boolean::parseBoolean).getOrElse(false)) {
+            delete project.file('runs/gametest')
+        }
+    }
+}
+
+dependencies {
+    // Aggregate-only GameTests exercise public packet payload types whose
+    // signatures include Sable and Create classes. Reuse the exact same named
+    // development artifacts as the component modules; none are packaged here.
+    compileOnly files(project(':simulated:forge').tasks.named('patchSableForNamedDev'))
+    compileOnly files(project(':simulated:forge').tasks.named('patchVeilForNamedDev'))
+    modCompileOnly("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+    modCompileOnly("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}") { transitive = false }
+    modCompileOnly("dev.engine-room.flywheel:flywheel-forge-${minecraft_version}:${flywheel_version}") { transitive = false }
+    modCompileOnly("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}")
+    modCompileOnly("com.tterrag.registrate:Registrate:${registrate_version}")
+
+    forgeProjects.forEach {
+        def parentName = it.parent.name
+        implementation(it) {
+            capabilities {
+                requireCapability "$group:${parentName}"
+            }
+        }
+    }
+}

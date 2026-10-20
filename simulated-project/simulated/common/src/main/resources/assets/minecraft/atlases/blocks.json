@@ -1,0 +1,31 @@
+{
+  "sources": [
+    {
+      "type": "single",
+      "resource": "simulated:entity/diagram_large"
+    },
+    {
+      "type": "single",
+      "resource": "simulated:entity/diagram_medium"
+    },
+    {
+      "type": "single",
+      "resource": "simulated:entity/diagram_small"
+    },
+    {
+      "type": "single",
+      "resource": "simulated:gui/sprites/banner",
+      "sprite": "simulated:banner"
+    },
+    {
+      "type": "single",
+      "resource": "aeronautics:gui/sprites/banner",
+      "sprite": "aeronautics:banner"
+    },
+    {
+      "type": "single",
+      "resource": "offroad:gui/sprites/banner",
+      "sprite": "offroad:banner"
+    }
+  ]
+}

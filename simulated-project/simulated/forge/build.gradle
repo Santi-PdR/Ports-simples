@@ -1,0 +1,73 @@
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+def generatedResources = project(":simulated:common").file("src/generated/resources")
+def commonResources = project(":simulated:common").file("src/main/resources")
+
+legacyForge {
+    version = "${minecraft_version}-${forge_version}"
+
+    def at = project(':simulated:common').file('src/main/resources/META-INF/accesstransformer.cfg')
+
+    if (at.exists()) {
+        accessTransformers.from(at.absolutePath)
+    }
+
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+
+    runs {
+        configureEach {
+            systemProperty('forge.enabledGameTestNamespaces', mod_id)
+            ideName = "Simulated Forge ${it.name.capitalize()} (${project.path})"
+        }
+
+        client {
+            client()
+            gameDirectory = project.file('build/client')
+        }
+
+        server {
+            server()
+            gameDirectory = project.file('build/server')
+            programArgument('--nogui')
+        }
+
+        data {
+            data()
+            systemProperty('file.encoding', 'UTF-8')
+            gameDirectory = project.file('runs/data')
+            programArguments.addAll '--all',
+                    '--mod', 'simulated',
+                    '--output', generatedResources.absolutePath,
+                    '--existing', commonResources.absolutePath,
+                    '--existing-mod', 'create',
+                    '--existing-mod', 'forge'
+        }
+
+        gameTest {
+            type = "gameTestServer"
+            gameDirectory = project.file('build/gametest')
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+sourceSets.main.resources {
+    srcDir generatedResources.absolutePath
+}
+
+tasks.named('runGameTest') {
+    doFirst {
+        delete project.file('build/gametest')
+    }
+}

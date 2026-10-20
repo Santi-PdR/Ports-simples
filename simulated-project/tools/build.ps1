@@ -1,0 +1,611 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('release', 'test', 'quick', 'audit')]
+    [string]$Mode = 'release',
+    [string]$SableJar,
+    [string]$SableSha256,
+    [switch]$Offline
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+$repositoryPath = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).Path
+$toolCache = Join-Path $repositoryPath '.build-tools'
+$distributionDirectory = Join-Path $repositoryPath 'dist'
+$jdkVersion = '17.0.20.1'
+$jdkSha256 = '3D9006956FC8AF5601CD24FFC4F468BEF48279C7EBD8171B9BDF90D0AABFBF1F'
+
+$versionProperties = Get-Content -LiteralPath (Join-Path $repositoryPath 'gradle.properties') -Raw
+if ($versionProperties -notmatch '(?m)^jei_version\s*=\s*15\.49\.0\.191\s*$') {
+    throw 'The build must target the PJ JEI baseline 15.49.0.191'
+}
+
+function Get-Sha256 {
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return (($algorithm.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '').ToUpperInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Get-JavaMajorVersion {
+    param([Parameter(Mandatory)][string]$JavaExecutable)
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $text = (& $JavaExecutable -version 2>&1 | Out-String)
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    if ($LASTEXITCODE -ne 0 -or $text -notmatch 'version\s+"(?<major>\d+)') {
+        return $null
+    }
+    return [int]$Matches.major
+}
+
+function Find-Java17 {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($env:JAVA_HOME) {
+        $candidates.Add((Join-Path $env:JAVA_HOME 'bin\java.exe'))
+    }
+    $pathJava = Get-Command java.exe -ErrorAction SilentlyContinue
+    if ($pathJava) {
+        $candidates.Add($pathJava.Source)
+    }
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Get-JavaMajorVersion $candidate) -eq 17) {
+            return Split-Path -Parent (Split-Path -Parent $candidate)
+        }
+    }
+    return $null
+}
+
+function Install-Java17 {
+    if (-not [Environment]::Is64BitOperatingSystem -or $env:OS -ne 'Windows_NT') {
+        throw 'Automatic JDK installation supports 64-bit Windows. Install Java 17 and run again.'
+    }
+    New-Item -ItemType Directory -Path $toolCache -Force | Out-Null
+    $archive = Join-Path $toolCache "microsoft-jdk-$jdkVersion-windows-x64.zip"
+    $extractRoot = Join-Path $toolCache "microsoft-jdk-$jdkVersion-windows-x64"
+    $java = Get-ChildItem -LiteralPath $extractRoot -Filter java.exe -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '[\\/]bin[\\/]java\.exe$' } | Select-Object -First 1
+    if ($java -and (Get-JavaMajorVersion $java.FullName) -eq 17) {
+        return Split-Path -Parent (Split-Path -Parent $java.FullName)
+    }
+    if ($Offline) {
+        throw 'Java 17 was not found and offline mode cannot download it.'
+    }
+    Invoke-WebRequest -UseBasicParsing -Uri "https://aka.ms/download-jdk/microsoft-jdk-$jdkVersion-windows-x64.zip" -OutFile $archive
+    $actualHash = Get-Sha256 $archive
+    if ($actualHash -ne $jdkSha256) {
+        [System.IO.File]::Delete($archive)
+        throw "JDK checksum verification failed. Expected $jdkSha256, received $actualHash."
+    }
+    if (Test-Path -LiteralPath $extractRoot) {
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+    Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
+    $java = Get-ChildItem -LiteralPath $extractRoot -Filter java.exe -File -Recurse |
+        Where-Object { $_.FullName -match '[\\/]bin[\\/]java\.exe$' } | Select-Object -First 1
+    if (-not $java -or (Get-JavaMajorVersion $java.FullName) -ne 17) {
+        throw 'The verified JDK archive did not contain Java 17.'
+    }
+    return Split-Path -Parent (Split-Path -Parent $java.FullName)
+}
+
+function Assert-SableJar {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Sable JAR does not exist: $Path"
+    }
+    if ($SableSha256) {
+        $actualHash = Get-Sha256 $Path
+        if ($actualHash -ne $SableSha256.ToUpperInvariant()) {
+            throw "Sable checksum mismatch. Expected $SableSha256, received $actualHash."
+        }
+    }
+    else {
+        Write-Host 'Sable SHA-256 verification skipped; version and required JAR contents will still be validated.'
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Path).Path)
+    try {
+        foreach ($required in @(
+            'META-INF/mods.toml',
+            'dev/ryanhcode/sable/Sable.class',
+            'dev/ryanhcode/sable/physics/ReactionWheelManager.class'
+        )) {
+            if ($null -eq $archive.GetEntry($required)) {
+                throw "Sable dependency is missing $required"
+            }
+        }
+        $entry = $archive.GetEntry('META-INF/mods.toml')
+        $reader = [System.IO.StreamReader]::new($entry.Open())
+        try { $modsToml = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        if ($modsToml -notmatch '(?m)^version\s*=\s*"2\.0\.5-port\.1"\s*$') {
+            throw 'Sable dependency is not version 2.0.5-port.1.'
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Assert-ProductionJar {
+    param([Parameter(Mandatory)][string]$Path)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+        foreach ($required in @(
+            'META-INF/mods.toml',
+            'META-INF/jarjar/metadata.json',
+            'META-INF/jarjar/dev.simulated_team.simulated.simulated-forge-1.20.1-1.3.1-port.1.jar',
+            'META-INF/jarjar/dev.eriksonn.aeronautics.aeronautics-forge-1.20.1-1.3.1-port.1.jar',
+            'META-INF/jarjar/dev.ryanhcode.offroad.offroad-forge-1.20.1-1.3.1-port.1.jar',
+            'pack.mcmeta',
+            'LICENSE.md'
+        )) {
+            if ($required -notin $entries) {
+                throw "Production JAR is missing $required"
+            }
+        }
+
+        $packEntry = $archive.GetEntry('pack.mcmeta')
+        $packReader = [System.IO.StreamReader]::new($packEntry.Open())
+        try { $packText = $packReader.ReadToEnd() } finally { $packReader.Dispose() }
+        try { $packMetadata = $packText | ConvertFrom-Json -ErrorAction Stop } catch {
+            throw "Production JAR contains an invalid pack.mcmeta: $($_.Exception.Message)"
+        }
+        if ($packMetadata.pack.pack_format -ne 15 -or [string]::IsNullOrWhiteSpace([string]$packMetadata.pack.description)) {
+            throw 'Production JAR pack.mcmeta must declare pack format 15 and a non-empty description'
+        }
+
+        $moduleRefmaps = @(
+            @{
+                Jar = 'META-INF/jarjar/dev.simulated_team.simulated.simulated-forge-1.20.1-1.3.1-port.1.jar'
+                Refmap = 'simulated.refmap.json'
+                Configs = @('simulated.mixins.json', 'simulated-forge.mixins.json')
+                MappingChecks = @(
+                    @{
+                        Mixin = 'dev/simulated_team/simulated/mixin/world_presets/PrimaryLevelDataMixin'
+                        Member = 'parse'
+                        Target = 'Lnet/minecraft/world/level/storage/PrimaryLevelData;m_78530_('
+                    },
+                    @{
+                        Mixin = 'dev/simulated_team/simulated/mixin/world_presets/PrimaryLevelDataMixin'
+                        Member = 'setTagData'
+                        Target = 'Lnet/minecraft/world/level/storage/PrimaryLevelData;m_78545_('
+                    }
+                )
+                ClassMarkerChecks = @()
+                JavapChecks = @(
+                    @{
+                        Class = 'dev.simulated_team.simulated.index.SimRenderTypes'
+                        Patterns = @(
+                            'SHADER_PACK_LASER',
+                            'Iris\.isPackInUseQuick:',
+                            'public static net\.minecraft\.client\.renderer\.RenderType spring\(net\.minecraft\.resources\.ResourceLocation, boolean\);'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.blocks.lasers.AbstractLaserRenderer'
+                        Patterns = @(
+                            'SimRenderTypes\.laser:\(Z\)Lnet/minecraft/client/renderer/RenderType;',
+                            'shaderPackLaserVertex:',
+                            'OverlayTexture\.'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.blocks.spring.SpringRenderer'
+                        Patterns = @(
+                            'SimRenderTypes\.spring:\(Lnet/minecraft/resources/ResourceLocation;Z\)Lnet/minecraft/client/renderer/RenderType;',
+                            'shaderPackStressColor:',
+                            'OverlayTexture\.'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.entities.diagram.DiagramEntity'
+                        Patterns = @()
+                        ForbiddenPatterns = @(
+                            'DiagnosticLogLimiter',
+                            'SIMULATED-DIAGRAM-INTERACT',
+                            'public void tick\(\);',
+                            'SIMULATED-DIAGRAM-SUPPORT'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.entities.diagram.DiagramItem'
+                        Patterns = @()
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'SIMULATED-DIAGRAM-PLACE')
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.entities.diagram.screen.DiagramScreen'
+                        Patterns = @()
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'SIMULATED-DIAGRAM-SCREEN-INIT')
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.entities.launched_plunger.LaunchedPlungerEntityRenderer'
+                        Patterns = @(
+                            'ClientSubLevel\.renderPose:',
+                            'Pose3dc\.transformPosition:',
+                            'CatmulRomSpline\.generateSpline:',
+                            'SimRenderTypes\.rope:',
+                            'calculateOrientation:',
+                            'addRopeVertex:',
+                            'public static void renderRope\(java\.util\.List<net\.minecraft\.world\.phys\.Vec3>, net\.minecraft\.client\.renderer\.MultiBufferSource, net\.minecraft\.world\.level\.BlockAndTintGetter, com\.mojang\.blaze3d\.vertex\.PoseStack\);',
+                            'public static void renderRope\(java\.util\.List<net\.minecraft\.world\.phys\.Vec3>, net\.minecraft\.client\.renderer\.MultiBufferSource, net\.minecraft\.world\.level\.BlockAndTintGetter, com\.mojang\.blaze3d\.vertex\.PoseStack, int, int, boolean, float\);'
+                        )
+                        ForbiddenPatterns = @(
+                            'DiagnosticLogLimiter',
+                            'AtomicInteger',
+                            'GL11\.glGetInteger:',
+                            'SIMULATED-PLUNGER-'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.content.physics_staff.PhysicsStaffItemRenderer'
+                        Patterns = @(
+                            'public static net\.minecraft\.world\.phys\.Vec3 getFirstPersonFocusPos\(float, org\.joml\.Matrix4fc, org\.joml\.Matrix4fc\);',
+                            'itemProjMat:',
+                            'Matrix4f\.invert:',
+                            'ClientSubLevel\.renderPose:',
+                            'SimRenderTypes\.itemGlowingSolid:',
+                            'SimRenderTypes\.itemGlowingTranslucent:'
+                        )
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'AtomicInteger', 'SIMULATED-STAFF-FOCUS')
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.network.packets.contraption_diagram.DiagramOpenPacket'
+                        Patterns = @()
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'SIMULATED-DIAGRAM-OPEN')
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.neoforge.mixin.self_mixins.DiagramEntityMixin'
+                        Patterns = @(
+                            'writeSpawnData',
+                            'readSpawnData',
+                            'FriendlyByteBuf\.m_130079_:',
+                            'FriendlyByteBuf\.m_130260_:',
+                            'NetworkHooks\.getEntitySpawningPacket:'
+                        )
+                        ForbiddenPatterns = @(
+                            'DiagnosticLogLimiter',
+                            'AtomicInteger',
+                            'SIMULATED-DIAGRAM-SPAWN-'
+                        )
+                    },
+                    @{
+                        Class = 'dev.simulated_team.simulated.neoforge.mixin.veil_compat.VeilResourceManagerImplMixin'
+                        Patterns = @(
+                            'PackResourcesExtension\.veil\$listResources:',
+                            'Files\.newInputStream:',
+                            'PackResourcesExtension\$PackResourceConsumer\.accept:',
+                            'UncheckedIOException'
+                        )
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'static resources from the nested archive')
+                    }
+                )
+            },
+            @{
+                Jar = 'META-INF/jarjar/dev.eriksonn.aeronautics.aeronautics-forge-1.20.1-1.3.1-port.1.jar'
+                Refmap = 'aeronautics.refmap.json'
+                Configs = @('aeronautics.mixins.json', 'aeronautics-forge.mixins.json')
+                MappingChecks = @()
+                ClassMarkerChecks = @(
+                    @{
+                        Class = 'dev/eriksonn/aeronautics/mixin/levitite/ItemBlockRenderTypesMixin.class'
+                        Markers = @(
+                            'f_109275_',
+                            'BLOCK_RENDER_TYPES',
+                            'containsKey',
+                            'getChunkRenderType',
+                            'getMovingBlockRenderType',
+                            'aeronautics$getLiveFirstLayer'
+                        )
+                    },
+                    @{
+                        Class = 'dev/eriksonn/aeronautics/compat/ChunkRenderLayerCompatibility.class'
+                        Markers = @(
+                            'liveLayerIdInterpretationEnabled',
+                            'isLiveLayerIdInterpretationEnabled',
+                            'setLiveLayerIdInterpretationEnabled'
+                        )
+                    }
+                )
+                JavapChecks = @(
+                    @{
+                        Class = 'dev.eriksonn.aeronautics.mixin.levitite.ItemBlockRenderTypesMixin'
+                        Patterns = @(
+                            'ChunkRenderTypeSet\.iterator:',
+                            'RenderTypeHelper\.getMovingBlockRenderType:',
+                            'ForgeRegistries\.BLOCKS:'
+                        )
+                    },
+                    @{
+                        Class = 'dev.eriksonn.aeronautics.mixin.levitite.ChunkRenderTypeSetMixin'
+                        Patterns = @(
+                            'aeronautics\$captureCreationLayers',
+                            'ChunkRenderLayerCompatibility\.isLiveLayerIdInterpretationEnabled:',
+                            'aeronautics\$creationLayers'
+                        )
+                    },
+                    @{
+                        Class = 'dev.eriksonn.aeronautics.neoforge.events.AeroNeoForgeClientEvents'
+                        Patterns = @(
+                            'registerClientCommands',
+                            'render_layer_compat',
+                            'LevelRenderer\.m_109818_:'
+                        )
+                    },
+                    @{
+                        Class = 'dev.eriksonn.aeronautics.content.blocks.hot_air.BlockEntityLiftingGasProvider'
+                        Patterns = @(
+                            '(?m)^  public default net\.minecraft\.core\.BlockPos getProviderBlockPos\(\);\r?$',
+                            '(?m)^  public default net\.minecraft\.world\.level\.Level getProviderLevel\(\);\r?$',
+                            'BlockEntity\.m_58899_:\(\)Lnet/minecraft/core/BlockPos;',
+                            'BlockEntity\.m_58904_:\(\)Lnet/minecraft/world/level/Level;'
+                        )
+                    }
+                )
+            },
+            @{
+                Jar = 'META-INF/jarjar/dev.ryanhcode.offroad.offroad-forge-1.20.1-1.3.1-port.1.jar'
+                Refmap = 'offroad.refmap.json'
+                Configs = @('offroad.mixins.json', 'offroad-forge.mixins.json')
+                MappingChecks = @()
+                ClassMarkerChecks = @()
+                JavapChecks = @(
+                    @{
+                        Class = 'dev.ryanhcode.offroad.content.blocks.wheel_mount.WheelMountRenderer'
+                        Patterns = @(
+                            'renderRotatingBuffer:',
+                            'FilteringRenderer\.renderOnBlockEntity:',
+                            'OffroadPartialModels\.SPRING_UPPER:',
+                            'OffroadPartialModels\.SPRING_LOWER:',
+                            'OffroadPartialModels\.SPRING_MIDDLE:',
+                            'ItemComponentCompat\.get:'
+                        )
+                        ForbiddenPatterns = @('DiagnosticLogLimiter', 'AtomicInteger', 'SIMULATED-WHEEL-MOUNT-RENDER')
+                    }
+                )
+            }
+        )
+
+        foreach ($module in $moduleRefmaps) {
+            $moduleEntry = $archive.GetEntry($module.Jar)
+            $memory = [System.IO.MemoryStream]::new()
+            $moduleStream = $moduleEntry.Open()
+            try { $moduleStream.CopyTo($memory) } finally { $moduleStream.Dispose() }
+            $memory.Position = 0
+            $nested = [System.IO.Compression.ZipArchive]::new(
+                $memory,
+                [System.IO.Compression.ZipArchiveMode]::Read,
+                $false)
+            try {
+                foreach ($classEntry in @($nested.Entries | Where-Object { $_.FullName -like '*.class' })) {
+                    $classStream = $classEntry.Open()
+                    try {
+                        $classMemory = [System.IO.MemoryStream]::new()
+                        try {
+                            $classStream.CopyTo($classMemory)
+                            $classText = [System.Text.Encoding]::GetEncoding(28591).GetString($classMemory.ToArray())
+                        }
+                        finally {
+                            $classMemory.Dispose()
+                        }
+                    }
+                    finally {
+                        $classStream.Dispose()
+                    }
+                    if ($classText.Contains('DiagnosticLogLimiter')) {
+                        throw "$($module.Jar) contains production diagnostics in $($classEntry.FullName)"
+                    }
+                }
+
+                if (@($module.JavapChecks).Count -gt 0) {
+                    $temporaryJar = Join-Path ([System.IO.Path]::GetTempPath()) ("simulated-production-audit-$([Guid]::NewGuid().ToString('N')).jar")
+                    try {
+                        [System.IO.File]::WriteAllBytes($temporaryJar, $memory.ToArray())
+                        $javap = Join-Path $env:JAVA_HOME 'bin\javap.exe'
+                        foreach ($check in $module.JavapChecks) {
+                            $previousErrorAction = $ErrorActionPreference
+                            try {
+                                $ErrorActionPreference = 'Continue'
+                                $javapText = (& $javap -classpath $temporaryJar -c -p $check.Class 2>&1 | Out-String)
+                                $javapExitCode = $LASTEXITCODE
+                            }
+                            finally {
+                                $ErrorActionPreference = $previousErrorAction
+                            }
+                            if ($javapExitCode -ne 0) {
+                                throw "$($module.Jar) could not inspect $($check.Class) with javap"
+                            }
+                            foreach ($pattern in $check.Patterns) {
+                                if ($javapText -notmatch $pattern) {
+                                    throw "$($module.Jar) class $($check.Class) failed production bytecode check: $pattern"
+                                }
+                            }
+                            foreach ($pattern in @($check.ForbiddenPatterns)) {
+                                if ([string]::IsNullOrWhiteSpace([string]$pattern)) {
+                                    continue
+                                }
+                                if ($javapText -match $pattern) {
+                                    throw "$($module.Jar) class $($check.Class) contains forbidden production bytecode: $pattern"
+                                }
+                            }
+                        }
+                    }
+                    finally {
+                        if (Test-Path -LiteralPath $temporaryJar) {
+                            [System.IO.File]::Delete($temporaryJar)
+                        }
+                    }
+                }
+
+                $nestedPackEntry = $nested.GetEntry('pack.mcmeta')
+                if ($null -eq $nestedPackEntry) {
+                    throw "$($module.Jar) is missing pack.mcmeta"
+                }
+                $nestedPackReader = [System.IO.StreamReader]::new($nestedPackEntry.Open())
+                try { $nestedPackText = $nestedPackReader.ReadToEnd() } finally { $nestedPackReader.Dispose() }
+                try { $nestedPackMetadata = $nestedPackText | ConvertFrom-Json -ErrorAction Stop } catch {
+                    throw "$($module.Jar) contains an invalid pack.mcmeta: $($_.Exception.Message)"
+                }
+                if ($nestedPackMetadata.pack.pack_format -ne 15 -or [string]::IsNullOrWhiteSpace([string]$nestedPackMetadata.pack.description)) {
+                    throw "$($module.Jar) pack.mcmeta must declare pack format 15 and a non-empty description"
+                }
+
+                if ($module.Jar -like '*dev.simulated_team.simulated.*') {
+                    $atlasEntry = $nested.GetEntry('assets/minecraft/atlases/blocks.json')
+                    if ($null -eq $atlasEntry) {
+                        throw "$($module.Jar) is missing the Minecraft block atlas definition"
+                    }
+                    $atlasReader = [System.IO.StreamReader]::new($atlasEntry.Open())
+                    try { $atlasText = $atlasReader.ReadToEnd() } finally { $atlasReader.Dispose() }
+                    try { $atlas = $atlasText | ConvertFrom-Json -ErrorAction Stop } catch {
+                        throw "$($module.Jar) contains an invalid block atlas definition: $($_.Exception.Message)"
+                    }
+                    $sprites = @($atlas.sources | ForEach-Object { $_.sprite })
+                    foreach ($requiredSprite in @('simulated:banner', 'aeronautics:banner', 'offroad:banner')) {
+                        if ($requiredSprite -notin $sprites) {
+                            throw "$($module.Jar) block atlas is missing $requiredSprite"
+                        }
+                    }
+                }
+
+                foreach ($check in $module.ClassMarkerChecks) {
+                    $classEntry = $nested.GetEntry($check.Class)
+                    if ($null -eq $classEntry) {
+                        throw "$($module.Jar) is missing $($check.Class)"
+                    }
+                    $classMemory = [System.IO.MemoryStream]::new()
+                    $classStream = $classEntry.Open()
+                    try { $classStream.CopyTo($classMemory) } finally { $classStream.Dispose() }
+                    $classText = [System.Text.Encoding]::GetEncoding(28591).GetString($classMemory.ToArray())
+                    foreach ($marker in $check.Markers) {
+                        if (-not $classText.Contains($marker)) {
+                            throw "$($module.Jar) class $($check.Class) is missing marker $marker"
+                        }
+                    }
+                }
+
+                $refmapEntry = $nested.GetEntry($module.Refmap)
+                if ($null -eq $refmapEntry -or $refmapEntry.Length -lt 32) {
+                    throw "$($module.Jar) is missing a non-empty $($module.Refmap)"
+                }
+
+                $refmapReader = [System.IO.StreamReader]::new($refmapEntry.Open())
+                try { $refmapText = $refmapReader.ReadToEnd() } finally { $refmapReader.Dispose() }
+                try { $refmap = $refmapText | ConvertFrom-Json -ErrorAction Stop } catch {
+                    throw "$($module.Jar) contains an invalid $($module.Refmap): $($_.Exception.Message)"
+                }
+                if ($null -eq $refmap.mappings -or @($refmap.mappings.PSObject.Properties).Count -eq 0) {
+                    throw "$($module.Jar) contains an empty $($module.Refmap) mapping set"
+                }
+
+                foreach ($check in $module.MappingChecks) {
+                    $mixinMappings = $refmap.data.searge.PSObject.Properties[$check.Mixin].Value
+                    $mappedTarget = if ($null -eq $mixinMappings) {
+                        $null
+                    } else {
+                        $mixinMappings.PSObject.Properties[$check.Member].Value
+                    }
+                    if ([string]::IsNullOrWhiteSpace([string]$mappedTarget) -or -not $mappedTarget.Contains($check.Target)) {
+                        throw "$($module.Jar) does not map $($check.Mixin)::$($check.Member) to $($check.Target)"
+                    }
+                }
+
+                foreach ($configName in $module.Configs) {
+                    $configEntry = $nested.GetEntry($configName)
+                    if ($null -eq $configEntry) {
+                        throw "$($module.Jar) is missing $configName"
+                    }
+                    $configReader = [System.IO.StreamReader]::new($configEntry.Open())
+                    try { $configText = $configReader.ReadToEnd() } finally { $configReader.Dispose() }
+                    try { $config = $configText | ConvertFrom-Json -ErrorAction Stop } catch {
+                        throw "$($module.Jar) contains an invalid ${configName}: $($_.Exception.Message)"
+                    }
+                    if ($config.refmap -ne $module.Refmap) {
+                        throw "$($module.Jar) config $configName does not reference $($module.Refmap)"
+                    }
+                }
+            }
+            finally {
+                $nested.Dispose()
+            }
+        }
+
+        $forbidden = @($entries | Where-Object {
+            $_ -match '(^|/)(validation|gametest|evidence|construction|logs?)(/|$)' -or
+            $_ -match '(^|/)DedicatedServerLifecycleValidation\.class$'
+        })
+        if ($forbidden.Count -gt 0) {
+            throw "Development-only content entered the production JAR: $($forbidden -join ', ')"
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+& (Join-Path $PSScriptRoot 'audit-public-tree.ps1') -Repository $repositoryPath
+if ($Mode -eq 'audit') {
+    return
+}
+
+if (-not $SableJar) { $SableJar = $env:SIMULATED_SABLE_JAR }
+if (-not $SableJar) {
+    throw 'Provide the exact Sable 2.0.5-port.1 JAR with -SableJar or SIMULATED_SABLE_JAR.'
+}
+$SableJar = (Resolve-Path -LiteralPath $SableJar).Path
+Assert-SableJar $SableJar
+
+$javaHome = Find-Java17
+if (-not $javaHome) { $javaHome = Install-Java17 }
+$env:JAVA_HOME = $javaHome
+$env:Path = (Join-Path $javaHome 'bin') + [IO.Path]::PathSeparator + $env:Path
+
+$gradle = Join-Path $repositoryPath 'gradlew.bat'
+$arguments = @('--no-daemon', '--stacktrace', '-p', $repositoryPath, "-Psable_jar=$SableJar", 'clean', ':aeronautics-bundled:build')
+if ($Offline) { $arguments += '--offline' }
+if ($Mode -eq 'quick') { $arguments += @('-x', 'test') }
+
+& $gradle @arguments
+if ($LASTEXITCODE -ne 0) { throw "Simulated build failed with exit code $LASTEXITCODE" }
+
+if ($Mode -eq 'test') {
+    $testArguments = @('--no-daemon', '--stacktrace', '-p', $repositoryPath, "-Psable_jar=$SableJar", ':all-forge:runGameTest')
+    if ($Offline) { $testArguments += '--offline' }
+    & $gradle @testArguments
+    if ($LASTEXITCODE -ne 0) { throw "Simulated GameTest failed with exit code $LASTEXITCODE" }
+}
+
+$artifacts = @(Get-ChildItem -LiteralPath (Join-Path $repositoryPath 'aeronautics-bundled\build\libs') -Filter 'create-aeronautics-bundled-1.20.1-*.jar' -File |
+    Where-Object { $_.Name -notmatch '-(sources|dev|slim)\.jar$' })
+if ($artifacts.Count -ne 1) {
+    throw "Expected one production bundle, found $($artifacts.Count)."
+}
+$artifact = $artifacts[0]
+Assert-ProductionJar $artifact.FullName
+
+New-Item -ItemType Directory -Path $distributionDirectory -Force | Out-Null
+Get-ChildItem -LiteralPath $distributionDirectory -File -ErrorAction SilentlyContinue | Remove-Item -Force
+$destination = Join-Path $distributionDirectory $artifact.Name
+Copy-Item -LiteralPath $artifact.FullName -Destination $destination
+$hash = Get-Sha256 $destination
+[System.IO.File]::WriteAllText(
+    (Join-Path $distributionDirectory 'SHA256SUMS.txt'),
+    "$hash  $($artifact.Name)`n",
+    [System.Text.UTF8Encoding]::new($false))
+
+Write-Host "Build complete: $destination"
+Write-Host "SHA-256: $hash"

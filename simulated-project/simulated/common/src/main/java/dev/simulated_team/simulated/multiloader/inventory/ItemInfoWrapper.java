@@ -1,0 +1,39 @@
+package dev.simulated_team.simulated.multiloader.inventory;
+
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.NotNull;
+
+/**
+ * An info wrapper that holds an item type, and its associated component data. Primarly used for Simulated's multiloader inventory structure. <p>
+ * In order to generate a wrapper from a given item easily, <b>{@link ItemInfoWrapper#generateFromStack(ItemStack) generateFromStack()}</b> can be used. <p>
+ * In order to generate a new item from a given wrapper easily, <b>{@link ItemInfoWrapper#generateFromInfo(ItemInfoWrapper) generateFromInfo()}</b> can be used.
+ *
+ * @param type     The item type of this wrapper
+ * @param stackData The count-independent serialized 1.20.1 stack data
+ */
+public record ItemInfoWrapper(Item type, CompoundTag stackData) {
+
+    /**
+     * Generates a new wrapper from the given item
+     *
+     * @param stack The item stack to gather information from.
+     * @return A <b>new</b> {@link ItemInfoWrapper} containing the type and data components from the given item.
+     */
+    public static ItemInfoWrapper generateFromStack(final ItemStack stack) {
+        final CompoundTag data = stack.save(new CompoundTag());
+        data.putByte("Count", (byte) 1);
+        return new ItemInfoWrapper(stack.getItem(), data);
+    }
+
+    /**
+     * Generates a new {@link ItemStack} from the given wrapper.
+     *
+     * @param info The {@link ItemInfoWrapper} to use information from.
+     * @return A <b>new</b> {@link ItemStack} containing data from the given wrapper.
+     */
+    public static @NotNull ItemStack generateFromInfo(final ItemInfoWrapper info) {
+        return ItemStack.of(info.stackData().copy());
+    }
+}

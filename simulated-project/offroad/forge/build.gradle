@@ -1,0 +1,56 @@
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+evaluationDependsOn(':simulated:forge')
+
+def generatedResources = project(":offroad:common").file("src/generated/resources")
+def commonResources = project(":offroad:common").file("src/main/resources")
+
+legacyForge {
+    version = "${minecraft_version}-${forge_version}"
+
+    def at = project(':offroad:common').file('src/main/resources/META-INF/accesstransformer.cfg')
+
+    if (at.exists()) {
+        accessTransformers.from(at.absolutePath)
+    }
+
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+
+    runs {
+        configureEach {
+            systemProperty('forge.enabledGameTestNamespaces', mod_id)
+            programArgument('-mixin.config=simulated.mixins.json')
+            programArgument('-mixin.config=simulated-forge.mixins.json')
+            ideName = "Offroad Forge ${it.name.capitalize()} (${project.path})"
+        }
+        data {
+            data()
+            gameDirectory = project.file('runs/data')
+            programArguments.addAll '--all',
+                    '--mod', 'offroad',
+                    '--output', generatedResources.absolutePath,
+                    '--existing', commonResources.absolutePath,
+                    '--existing-mod', 'create',
+                    '--existing-mod', 'simulated'
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+        simulated {
+            sourceSet project(':simulated:forge').sourceSets.main
+        }
+    }
+}
+
+sourceSets.main.resources {
+    srcDir generatedResources.absolutePath
+}

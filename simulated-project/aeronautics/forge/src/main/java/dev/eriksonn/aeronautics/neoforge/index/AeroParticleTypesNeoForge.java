@@ -1,0 +1,36 @@
+package dev.eriksonn.aeronautics.neoforge.index;
+
+import dev.eriksonn.aeronautics.Aeronautics;
+import dev.eriksonn.aeronautics.index.AeroParticleTypes;
+import com.simibubi.create.foundation.utility.CreateLang;
+import net.minecraft.core.particles.ParticleType;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.registries.DeferredRegister;
+
+public class AeroParticleTypesNeoForge {
+    public static final DeferredRegister<ParticleType<?>> PARTICLE_TYPES =
+            DeferredRegister.create(Registries.PARTICLE_TYPE, Aeronautics.MOD_ID);
+
+    public static void register(final IEventBus modEventBus) {
+        for (final AeroParticleTypes type : AeroParticleTypes.values()) {
+            final String name = CreateLang.asId(type.name());
+            PARTICLE_TYPES.register(name, type::get);
+        }
+
+        PARTICLE_TYPES.register(modEventBus);
+    }
+
+    public static void registerClient(final IEventBus modEventBus) {
+        modEventBus.addListener(AeroParticleTypesNeoForge::registerParticleProviders);
+    }
+
+    public static void registerParticleProviders(final RegisterParticleProvidersEvent event) {
+        AeroParticleTypes.registerClientParticles((x) -> {
+            //noinspection rawtypes,unchecked
+            x.getTypeFactory().get().register((ParticleType) x.getObject(), event);
+        });
+    }
+
+}

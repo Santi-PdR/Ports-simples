@@ -1,0 +1,227 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+base {
+    archivesName = "${mod_id}-${project.name}-${minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.compilerArgs.addAll(['-Xmaxerrs', '10000'])
+}
+
+repositories {
+    mavenCentral()
+
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Sponge'
+                url = 'https://repo.spongepowered.org/repository/maven-public'
+            }
+        }
+        filter { includeGroupAndSubgroups('org.spongepowered') }
+    }
+
+    exclusiveContent {
+        forRepositories(
+                maven {
+                    name = 'ParchmentMC'
+                    url = 'https://maven.parchmentmc.org/'
+                },
+                maven {
+                    name = "Forge"
+                    url = 'https://maven.minecraftforge.net'
+                }
+        )
+        filter { includeGroup('org.parchmentmc.data') }
+    }
+    maven {
+        name = 'BlameJared'
+        url = 'https://maven.blamejared.com'
+    }
+}
+
+// Sable is another port project and is not redistributed from this repository.
+// Supply its production JAR with -Psable_jar=<path> or SIMULATED_SABLE_JAR.
+// Resolution is lazy so project discovery does not require the binary.
+def sablePortJar = rootProject.files(providers.provider {
+    def configured = providers.gradleProperty('sable_jar')
+            .orElse(providers.environmentVariable('SIMULATED_SABLE_JAR'))
+            .orNull
+    if (configured == null || configured.trim().isEmpty()) {
+        throw new GradleException('Missing Sable dependency: use -Psable_jar=<path> or SIMULATED_SABLE_JAR')
+    }
+    def jar = rootProject.file(configured)
+    if (!jar.isFile()) {
+        throw new GradleException("Sable dependency does not exist: ${jar}")
+    }
+    jar
+})
+
+configurations {
+    veilSlim
+}
+
+dependencies {
+    // ModDevGradle's legacy Forge Mixin integration needs the processor on
+    // every source set that contains Mixins. Loader projects compile their
+    // own Mixins together with the shared common sources, so this cannot be
+    // limited to the common projects.
+    compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
+    annotationProcessor group: 'org.spongepowered', name: 'mixin', version: '0.8.5', classifier: 'processor'
+
+    veilSlim("foundry.veil:Veil-forge-${minecraft_version}:${veil_version}:slim") {
+        transitive = false
+    }
+}
+
+def patchVeilForNamedDev = tasks.register('patchVeilForNamedDev', PatchVeilForNamedDev) {
+    dependsOn tasks.matching { it.name == 'createMinecraftArtifacts' }
+    inputJar = layout.file(configurations.veilSlim.elements.map { files ->
+        if (files.size() != 1) {
+            throw new GradleException("Expected one Veil slim artifact, found ${files.size()}")
+        }
+        files.iterator().next().asFile
+    })
+    mappings = layout.buildDirectory.file('moddev/artifacts/intermediateToNamed.srg')
+    outputJar = layout.buildDirectory.file("devlibs/Veil-forge-${minecraft_version}-${veil_version}-named-dev.jar")
+}
+
+// The supplied Sable artifact is the exact production SRG JAR used by PJ.
+// Remap that same artifact for ModDev's named compile/run classpath instead of
+// maintaining a second, potentially divergent Sable development build.
+def patchSableForNamedDev = tasks.register('patchSableForNamedDev', PatchVeilForNamedDev) {
+    dependsOn tasks.matching { it.name == 'createMinecraftArtifacts' }
+    inputJar = layout.file(providers.provider { sablePortJar.singleFile })
+    mappings = layout.buildDirectory.file('moddev/artifacts/intermediateToNamed.srg')
+    outputJar = layout.buildDirectory.file("devlibs/sable-forge-${minecraft_version}-named-dev.jar")
+}
+
+if (project.path.endsWith(":common")) {
+    dependencies {
+        // Development-only named view of the exact external production JAR.
+        // It remains external and is not nested into any published artifact.
+        implementation files(patchSableForNamedDev)
+
+        compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+        annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+
+        // forge variant of JEI for 1.20.1
+        compileOnly("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+
+        // Veil dev jar is remapped SRG -> named by patchVeilForNamedDev.
+        compileOnly files(patchVeilForNamedDev)
+
+        // Mod compat: only mods with verified 1.20.1 Forge coordinates are kept.
+        compileOnly("cc.tweaked:cc-tweaked-$minecraft_version-common-api:$computercraft_tweaked_version")
+        compileOnly("maven.modrinth:natures-compass:$minecraft_version-$natures_compass_version-forge")
+        compileOnly("maven.modrinth:explorers-compass:$minecraft_version-$explorers_compass_version-forge")
+        compileOnly("maven.modrinth:GchcoXML:$oculus_version_id")
+        // PJ's renderer is Embeddium 0.3.31. Keep it compile-only: the mod is
+        // optional at runtime and is never redistributed by this project.
+        compileOnly("maven.modrinth:embeddium:$embeddium_version")
+    }
+}
+
+// These artifacts contain references to obfuscated Minecraft methods. Supplying
+// them as plain compileOnly/implementation dependencies leaves SRG override names
+// (for example IBE's EntityBlock methods) on the named development classpath.
+// Let ModDevGradle remap them before compiling common sources.
+plugins.withId('net.neoforged.moddev.legacyforge') {
+    // Use ModDevGradle's authoritative Mixin integration. Besides generating
+    // and packaging the refmap, it feeds the annotation processor's extra
+    // Shadow/Accessor mappings into reobfJar and tracks both generated files
+    // as build outputs, including cache restores after a clean build.
+    mixin {
+        add sourceSets.main, "${mod_id}.refmap.json"
+        config "${mod_id}.mixins.json"
+        if (project.path.endsWith(':forge')) {
+            config "${mod_id}-forge.mixins.json"
+        }
+    }
+
+    dependencies {
+        modImplementation("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+        modImplementation("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}")
+        modCompileOnly("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}")
+        modImplementation("com.tterrag.registrate:Registrate:${registrate_version}")
+    }
+}
+
+['apiElements', 'runtimeElements', 'sourcesElements'].each { variant ->
+    configurations."$variant".outgoing {
+        capability("$group:${base.archivesName.get()}:$version")
+        capability("$group:$mod_id-${project.name}-${minecraft_version}:$version")
+        capability("$group:$mod_id:$version")
+    }
+    publishing.publications.configureEach {
+        suppressPomMetadataWarningsFor(variant)
+    }
+}
+
+sourcesJar {
+    from(rootProject.file('LICENSE.md'))
+}
+
+jar {
+    from(rootProject.file('LICENSE.md'))
+
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_name,
+                'Specification-Vendor'  : mod_author,
+                'Specification-Version' : project.jar.archiveVersion,
+                'Implementation-Title'  : project.name,
+                'Implementation-Version': project.jar.archiveVersion,
+                'Implementation-Vendor' : mod_author,
+                'Built-On-Minecraft'    : minecraft_version,
+                // Forge 1.20.1 has no mods.toml [[mixins]] table; mixin configs ship
+                // through the manifest like the proven Sable Forge port.
+                'MixinConfigs'          : "${mod_id}.mixins.json,${mod_id}-forge.mixins.json"
+        ])
+    }
+}
+
+processResources {
+    var expandProps = [
+            'version'                     : version,
+            'group'                       : project.group,
+            'minecraft_version'           : minecraft_version,
+            'minecraft_version_range'     : minecraft_version_range,
+            'mod_name'                    : mod_name,
+            'mod_author'                  : mod_author,
+            'mod_id'                      : mod_id,
+            'license'                     : license,
+            'description'                 : project.description,
+            'forge_version'               : forge_version,
+            'forge_loader_version_range'  : forge_loader_version_range,
+            'sable_mod_version_range'     : sable_mod_version_range,
+            'create_mod_version'          : create_mod_version,
+            'flywheel_mod_version'        : flywheel_mod_version,
+            'credits'                     : credits,
+            'java_version'                : java_version
+    ]
+
+    filesMatching(['pack.mcmeta', 'META-INF/mods.toml', '*.mixins.json']) {
+        expand expandProps
+    }
+    inputs.properties(expandProps)
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            artifactId base.archivesName.get()
+            from components.java
+        }
+    }
+}
