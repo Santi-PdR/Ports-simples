@@ -118,7 +118,7 @@ def create_bundle(output: pathlib.Path, downloaded: list[tuple[dict, bytes]]) ->
             for item, _ in downloaded
         ]
     }
-    mods_toml = f'''modLoader="javafml"
+    mods_toml = f'''modLoader="lowcodefml"
 loaderVersion="[47,)"
 license="See the original license metadata in each nested mod JAR"
 
