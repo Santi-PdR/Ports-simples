@@ -2,9 +2,15 @@
 
 Target: Minecraft 1.20.1, Forge, Create mc1.20.1-6.0.8. Snapshot: 2026-10-23.
 
-The Desktop `Ports-Jar` directory contains one latest selected JAR per compatible add-on, plus required dependencies. This is a set of upstream artifacts, not a merged Create JAR and not a claim that all mods have passed combined runtime testing.
+The Desktop `Ports-Jar` directory contains exactly one physical install file: `Ghouls-Create-Addons-1.20.1-Create-6.0.8.jar`. It is a Forge Jar-in-Jar package: the eight upstream JARs listed below are nested unmodified under `META-INF/jarjar/` and are still discovered by Forge as separate mods. They are not merged into one code namespace.
 
-| File | Project/version | Source | SHA-512 |
+| Output | Size | SHA-256 | SHA-512 |
+| --- | ---: | --- | --- |
+| `Ghouls-Create-Addons-1.20.1-Create-6.0.8.jar` | 26,346,994 bytes | `10bf226d456578ce9658ced9770f53c1b52a79b219386f7ec4ac7382cee1a05c` | `3a065c0566d4e2216693e40f469ff27ec08f2be33ade7a8b187ce64eb63f7624dbf487bf4ccd4e6e60fd6e05adf36543af5d8acd4225ef1bc5ff1933b4e8d522` |
+
+The outer ZIP/JAR integrity and all eight nested SHA-512 checksums were verified. No Minecraft runtime launch has been performed; this records packaging integrity, not combined in-game compatibility.
+
+| Nested JAR under `META-INF/jarjar/` | Project/version | Source | SHA-512 |
 | --- | --- | --- | --- |
 | `Steam_Rails-1.7.3+forge-mc1.20.1.jar` | Steam 'n' Rails 1.7.3 Forge 1.20.1 C6 | https://modrinth.com/mod/create-steam-n-rails/version/7Uk6lWkU | `c46bd5e48e64914433157e8cb92f5679d3407fc6e3e3b40a1a41b043efa6f32a2eb9c486313358e92f9e4cf169710ab161bbfa86a2763afcadff3b6e92021175` |
 | `createaddition-1.20.1-1.3.3.jar` | Crafts & Additions 1.3.3 Forge | https://modrinth.com/mod/createaddition/version/9LgyB6Yb | `a34f5c3b0226069d2882a3e23ba0e364a78bc5d26983b0cecea8d998718f454d3238ab7c5b4b3ef1749b6f2b26a4e427839c7c32468558fa7a8edb0edc727d10` |
