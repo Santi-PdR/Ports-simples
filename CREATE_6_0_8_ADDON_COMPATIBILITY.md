@@ -4,18 +4,18 @@ Research snapshot: 2026-10-23. Target: Minecraft 1.20.1, Forge 47.4.x, Java 17, 
 
 | Add-on | Latest selected 1.20.1 Forge build | Create 6.0.8 evidence | Required dependency / caveat |
 | --- | --- | --- | --- |
-| Steam 'n' Rails | 1.7.3 | Upstream release name explicitly says Forge 1.20.1 C6. | Requires Create. |
-| Crafts & Additions | 1.3.3 | Release notes explicitly say updated to Create 6.0.8. | Requires Create. |
-| Enchantment Industry | 2.5.4b | Upstream release is explicitly for Create 6.0.8-291. | Requires Create: Dragons Plus 1.11.9, itself explicitly for Create 6.0.8; include both. |
-| Slice & Dice | 3.6.0 | Forge build exists for 1.20.1 and declares Create as required. | Farmer's Delight integration is optional; verify the desired recipes against the installed Farmer's Delight version. |
-| New Age | 1.2.0 | Forge 1.20.1 release exists; project supports Create add-on integration. | Botarium is required on 1.20.1; include Botarium 2.3.4 Forge. |
-| Diesel Generators | 1.3.12 | Official Modrinth version metadata pins required Create to mc1.20.1-6.0.8. | Requires Create. |
-| Create Deco | 2.0.3 | Upstream release notes say updated to Create 6. | Reports exist for some Create 6.0.8 combinations; keep isolated until runtime tested. |
-| Create Aeronautics / Sable | No official 1.20.1 Forge release identified. | Official Aeronautics release targets 1.21.1 NeoForge. | The experimental backport is a separate workstream and must retain its own license and asset boundaries. |
+| Steam 'n' Rails | 1.7.3 | Upstream release name explicitly says Forge 1.20.1 C6; JAR accepts Create 6.0.7+. | Requires Create. |
+| Crafts & Additions | 1.3.3 | Release notes say updated to Create 6.0.8; JAR accepts Create 6.0.3+. | Requires Create. |
+| Enchantment Industry | 2.5.4b | Upstream release is explicitly for Create 6.0.8-291; JAR accepts Create 6.0.8 through <6.1.0. | Requires Create: Dragons Plus 1.11.9, itself explicitly for Create 6.0.8; both included. |
+| Slice & Dice | 3.6.0 | Forge build exists for 1.20.1; JAR accepts Create 6.0.7+. | Farmer's Delight integration is optional; verify desired recipes against the installed Farmer's Delight version. |
+| New Age | 1.2.0 | JAR accepts Create 6.0.8 through <6.1.0. | Botarium is required on 1.20.1; Botarium 2.3.4 Forge is included. |
+| Diesel Generators | 1.3.12 | Official version metadata pins required Create to mc1.20.1-6.0.8; JAR accepts Create 6.0.7 through <6.1.0. | Requires Create. |
+| Create Deco | 2.0.3 | The JAR's Forge metadata requires Create exactly 6.0.2. | Excluded: does not accept Create 6.0.8. Release notes saying “Create 6” are too broad to establish compatibility. |
+| Create Aeronautics / Sable | No official 1.20.1 Forge release identified. | Official Aeronautics release targets 1.21.1 NeoForge. | Experimental backport remains separate and must retain its own license and asset boundaries. |
 
 ## Decision
 
-The official 1.20.1 Forge builds above already target Create 6.0.8 either explicitly or through the upstream Create 6 release. No source fork is justified without a reproducible failure. Package the latest upstream JAR for each selected add-on, plus the two required libraries/add-ons listed above. Do not represent Create Deco or the full pack as runtime-certified until tested.
+Eight selected JARs have Forge metadata accepting Create 6.0.8; this includes required Create: Dragons Plus and Botarium dependencies. Create Deco is excluded because its declared Create dependency is the exact version 6.0.2. Do not force-load it or claim compatibility without a source-level fix and runtime validation. No compatibility patch is needed for the selected official JARs. The complete modpack is not runtime-certified by this metadata audit.
 
 ## Upstream evidence
 
