@@ -6,9 +6,9 @@ The Desktop `Ports-Jar` directory contains exactly one physical install file: `G
 
 | Output | Size | SHA-256 | SHA-512 |
 | --- | ---: | --- | --- |
-| `Ghouls-Create-Addons-1.20.1-Create-6.0.8.jar` | 26,346,994 bytes | `10bf226d456578ce9658ced9770f53c1b52a79b219386f7ec4ac7382cee1a05c` | `3a065c0566d4e2216693e40f469ff27ec08f2be33ade7a8b187ce64eb63f7624dbf487bf4ccd4e6e60fd6e05adf36543af5d8acd4225ef1bc5ff1933b4e8d522` |
+| `Ghouls-Create-Addons-1.20.1-Create-6.0.8.jar` | 26,346,997 bytes | `652dff997192b86dd3a000c765aaf909c8e0c81cb57f56fec85599256f109420` | `471ac6f14e5b27dc9fb589cbc158b5ab7138bfce3d016c374dfc42a2f58c1d563a843adbfce50110fab69ac2c3004bc0769cd909b6d0fc687411d605a7d3029c` |
 
-The outer ZIP/JAR integrity and all eight nested SHA-512 checksums were verified. No Minecraft runtime launch has been performed; this records packaging integrity, not combined in-game compatibility.
+The outer wrapper uses Forge's `lowcodefml` no-code loader and Jar-in-Jar metadata. The outer ZIP/JAR integrity and all eight nested SHA-512 checksums were verified. No Minecraft runtime launch has been performed; this records packaging integrity, not combined in-game compatibility.
 
 | Nested JAR under `META-INF/jarjar/` | Project/version | Source | SHA-512 |
 | --- | --- | --- | --- |
