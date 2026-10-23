@@ -8,7 +8,7 @@ The Desktop `Ports-Jar` directory contains exactly one physical install file: `G
 | --- | ---: | --- | --- |
 | `Ghouls-Create-Addons-1.20.1-Create-6.0.8.jar` | 26,347,172 bytes | `b9a69a8a85ec6ffa4a5597372b5adbf348a5db8848f8bf012fec330d5a63439b` | `eca4975cc756031937144a01102ca65934ee1da25f92269fe0de47d2c19f23d1988640f8e986ffeedeca5b155278a00518f2a3a6ba0c5c2d7b47289130739a83` |
 
-The outer wrapper uses Forge's `lowcodefml` no-code loader, Jar-in-Jar metadata, and Minecraft 1.20.1 `pack.mcmeta` (format 15). The outer ZIP/JAR integrity and all eight nested SHA-512 checksums were verified. No Minecraft runtime launch has been performed; this records packaging integrity, not combined in-game compatibility.
+The outer wrapper uses Forge's `lowcodefml` no-code loader, Jar-in-Jar metadata, and Minecraft 1.20.1 `pack.mcmeta` (format 15). The outer ZIP/JAR integrity and all eight nested SHA-512 checksums were verified. The previous wrapper revision launched in `test-2` with Create 6.0.8 and reached an integrated world without a crash; its log showed a nonfatal missing-pack-metadata warning, which the current revision fixes. The corrected revision has not yet been relaunched, so this does not certify gameplay for every add-on.
 
 | Nested JAR under `META-INF/jarjar/` | Project/version | Source | SHA-512 |
 | --- | --- | --- | --- |
