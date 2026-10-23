@@ -9,7 +9,7 @@ Pin and record all of the following before changing code:
 - Minecraft 1.20.1
 - Forge 47.4.x (record the exact build used for each validation)
 - Java 17
-- Create 6.0.8
+- Create mc1.20.1-6.0.8
 - Exact Ponder, Flywheel, Registrate, loader, and add-on versions
 - Client, dedicated-server, and integrated-server scope
 
@@ -66,20 +66,7 @@ The delivery directory is an output location, not a workspace. Keep source, logs
 
 ## Current candidate status (research snapshot)
 
-These are research findings, not runtime certification:
-
-| Add-on | Candidate for 1.20.1 Forge / Create 6.0.8 | Evidence and caveat |
-| --- | --- | --- |
-| Steam 'n' Rails | 1.7.3 Forge | Upstream file is marked C6; verify the full pack at runtime. |
-| Crafts & Additions | 1.3.3 Forge | Release notes state it was updated to Create 6.0.8. |
-| Enchantment Industry | 1.4.1 Forge | Dedicated release for Create 6.0.8; use its 1.20.1 Forge file. |
-| Slice & Dice | 3.6.0 Forge | Correct MC/loader file exists; verify with the pack's Create build and Farmer's Delight recipes. |
-| New Age | 1.2.0 Forge | Correct MC/loader file exists; Botarium is required on 1.20.1. |
-| Diesel Generators | 1.3.12 Forge | Official version metadata requires Create 6.0.8; runtime behavior in this pack still needs a controlled check. |
-| Create Deco | 2.0.3 Forge | Changelog says Create 6 support; reports exist for some Create 6.0.8 combinations, so isolate and test. |
-| Create Aeronautics | No official 1.20.1 Forge file identified | Official release page lists 1.21.1 NeoForge. This repository's backport is a separate experimental port. |
-
-## Research reference
+See [CREATE_6_0_8_ADDON_COMPATIBILITY.md](CREATE_6_0_8_ADDON_COMPATIBILITY.md) for the exact selected Forge artifacts, dependency chain, upstream evidence, and warning status. These releases are candidates, not full-pack runtime certification.
 
 The REA repository presents reverse engineering as evidence-backed mapping with explicit limitations and unknowns. Its README also warns that analysis tools are not a sandbox and that license/protection boundaries still apply. This workflow applies those lessons to Minecraft JARs while preferring source-based ports whenever available.
 
