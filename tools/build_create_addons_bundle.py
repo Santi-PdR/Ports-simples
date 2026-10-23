@@ -147,7 +147,7 @@ Included artifacts:
         outer.writestr("META-INF/NOTICE.txt", notice)
         outer.writestr(
             "pack.mcmeta",
-            json.dumps({"pack": {"pack_format": 15, "description": BUNDLE_NAME}}, ensure_ascii=False) + "\\n",
+            json.dumps({"pack": {"pack_format": 15, "description": BUNDLE_NAME}}, ensure_ascii=False) + "\n",
         )
         for item, payload in downloaded:
             outer.writestr(f"META-INF/jarjar/{item['filename']}", payload)
